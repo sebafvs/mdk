@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build zip \
+            gcc-mingw-w64-x86-64-posix \
+            g++-mingw-w64-x86-64-posix \
+            mingw-w64-tools
+
+      - name: Configure + build
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_SYSTEM_NAME=Windows \
+            -DCMAKE_C_COMPILER=x86_64-w64-mingw32-gcc \
+            -DCMAKE_RC_COMPILER=x86_64-w64-mingw32-windres
+          ninja -C build
+
+      - name: Package
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          STAGE="mdk-${VERSION}"
+          mkdir -p "$STAGE/include/mdk" "$STAGE/lib" "$STAGE/loaders"
+
+          cp -r include/mdk/.      "$STAGE/include/mdk/"
+          cp     include/mdk.h     "$STAGE/include/"
+          cp     build/libmdk_*.a  "$STAGE/lib/"       2>/dev/null || true
+          cp     build/loaders/libmdk_loader_common.a "$STAGE/lib/" 2>/dev/null || true
+
+          shopt -s nullglob
+          for exe in build/loaders/*/*.exe; do
+            name=$(basename "$exe" .exe)
+            mkdir -p "$STAGE/loaders/$name"
+            cp "$exe" "$STAGE/loaders/$name/"
+          done
+
+          cp README.md LICENSE NOTICE.md CMakeLists.txt "$STAGE/"
+          zip -r "${STAGE}.zip" "$STAGE"
+          echo "STAGE=$STAGE" >> "$GITHUB_ENV"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/}"
+          gh release create "$VERSION" \
+            --title "MDK ${VERSION}" \
+            --notes "MDK ${VERSION}. Prebuilt mingw-w64 static libs and example loader EXEs. Build it yourself with \`cmake -B build -G Ninja ...\` and \`ninja -C build\`." \
+            "${STAGE}.zip"
