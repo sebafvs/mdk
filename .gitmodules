@@ -1,0 +1,4 @@
+[submodule "loaders"]
+	path = loaders
+	url = git@github.com:purpleranges/loaders.git
+	branch = main
